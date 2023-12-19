@@ -2,7 +2,7 @@ use std::net::UdpSocket;
 
 // The whole must be 12 bytes when encoded.
 // which is 3 x 4 bytes.
-#[derive(Default)]
+#[derive(Default, PartialEq, Debug)]
 struct Header {
     packet_id: u16, // 16 bit
 
@@ -28,6 +28,122 @@ impl Header {
             packet_id: id,
             query_response_indicator: true,
             ..Self::default()
+        }
+    }
+
+    fn packet_id(self, packet_id: u16) -> Self {
+        Self { packet_id, ..self }
+    }
+
+    fn query_response_indicator(self, query_response_indicator: bool) -> Self {
+        Self {
+            query_response_indicator,
+            ..self
+        }
+    }
+
+    fn operation_code(self, operation_code: u8) -> Self {
+        Self {
+            operation_code,
+            ..self
+        }
+    }
+
+    fn authoritative_answer(self, authoritative_answer: bool) -> Self {
+        Self {
+            authoritative_answer,
+            ..self
+        }
+    }
+
+    fn truncation(self, truncation: bool) -> Self {
+        Self { truncation, ..self }
+    }
+
+    fn recursion_desired(self, recursion_desired: bool) -> Self {
+        Self {
+            recursion_desired,
+            ..self
+        }
+    }
+
+    fn recursion_available(self, recursion_available: bool) -> Self {
+        Self {
+            recursion_available,
+            ..self
+        }
+    }
+
+    fn reserved(self, reserved: u8) -> Self {
+        Self { reserved, ..self }
+    }
+
+    fn response_code(self, response_code: u8) -> Self {
+        Self {
+            response_code,
+            ..self
+        }
+    }
+    fn question_count(self, question_count: u16) -> Self {
+        Self {
+            question_count,
+            ..self
+        }
+    }
+
+    fn answer_record(self, answer_record: u16) -> Self {
+        Self {
+            answer_record,
+            ..self
+        }
+    }
+
+    fn authority_record_count(self, authority_record_count: u16) -> Self {
+        Self {
+            authority_record_count,
+            ..self
+        }
+    }
+
+    fn additional_record_count(self, additional_record_count: u16) -> Self {
+        Self {
+            additional_record_count,
+            ..self
+        }
+    }
+
+    fn decode(buf: &[u8]) -> Self {
+        let packet_id: u16 = (buf[0] as u16) << 8 | (buf[1] as u16);
+
+        let query_response_indicator = /*-*/  buf[2] & 0b10000000 == 0b10000000;
+        let operation_code =           /*-*/  buf[2] & 0b01111000;
+        let authoritative_answer =     /*-*/  buf[2] & 0b00000100 == 0b00000100;
+        let truncation =               /*-*/  buf[2] & 0b00000010 == 0b00000010;
+        let recursion_desired =        /*-*/  buf[2] & 0b00000001 == 0b00000001;
+
+        let recursion_available =      /*-*/  buf[3] & 0b10000000 == 0b10000000;
+        let reserved =                 /*-*/  buf[3] & 0b01110000;
+        let response_code =            /*-*/  buf[3] & 0b00001111;
+
+        let question_count: u16 = (buf[4] as u16) << 8 | (buf[5] as u16);
+        let answer_record: u16 = (buf[6] as u16) << 8 | (buf[7] as u16);
+        let authority_record_count: u16 = (buf[8] as u16) << 8 | (buf[9] as u16);
+        let additional_record_count: u16 = (buf[10] as u16) << 8 | (buf[11] as u16);
+
+        Self {
+            packet_id,
+            query_response_indicator,
+            operation_code,
+            authoritative_answer,
+            truncation,
+            recursion_desired,
+            recursion_available,
+            reserved,
+            response_code,
+            question_count,
+            answer_record,
+            authority_record_count,
+            additional_record_count,
         }
     }
 
@@ -93,11 +209,9 @@ impl Question {
     fn encode(&self) -> Vec<u8> {
         let mut question_encoded = vec![];
 
-        question_encoded.append(&mut self.name.to_owned());
-        question_encoded.push((self.type_ >> 8) as u8);
-        question_encoded.push(self.type_ as u8);
-        question_encoded.push((self.class >> 8) as u8);
-        question_encoded.push(self.class as u8);
+        question_encoded.extend(self.name.to_owned());
+        question_encoded.extend(self.type_.to_be_bytes());
+        question_encoded.extend(self.class.to_be_bytes());
 
         question_encoded
     }
@@ -173,10 +287,10 @@ impl Answer {
         let mut encoded = vec![];
 
         encoded.extend(self.name.iter());
-        encoded.extend(self.type_.to_be_bytes().iter());
-        encoded.extend(self.class.to_be_bytes().iter());
-        encoded.extend(self.ttl.to_be_bytes().iter());
-        encoded.extend(self.length.to_be_bytes().iter());
+        encoded.extend(self.type_.to_be_bytes());
+        encoded.extend(self.class.to_be_bytes());
+        encoded.extend(self.ttl.to_be_bytes());
+        encoded.extend(self.length.to_be_bytes());
         encoded.extend(self.data.encode());
 
         encoded
@@ -198,15 +312,28 @@ fn main() {
         .with_length(4)
         .with_arcord(0x08080808);
 
-    let mut response = vec![];
-
-    response.extend(header.encode());
-    response.extend(question.encode());
-    response.extend(answer.encode());
-
     loop {
         match udp_socket.recv_from(&mut buf) {
             Ok((size, source)) => {
+                let mut header = Header::decode(&buf)
+                    .query_response_indicator(true)
+                    .authoritative_answer(false)
+                    .truncation(false)
+                    .recursion_available(false)
+                    .reserved(0);
+
+                if header.operation_code == 0 {
+                    header = header.response_code(0);
+                } else {
+                    header = header.response_code(4);
+                }
+
+                let mut response = vec![];
+
+                response.extend(header.encode());
+                response.extend(question.encode());
+                response.extend(answer.encode());
+
                 println!("Received {} bytes from {}", size, source);
                 udp_socket
                     .send_to(&response, source)
