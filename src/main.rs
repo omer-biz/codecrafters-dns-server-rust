@@ -110,19 +110,15 @@ fn main() {
     header.question_count = 1;
 
     let question = Question::new("codecrafters.io").with_type(1).with_class(1);
+    let mut response = vec![];
+
+    response.extend(header.encode());
+    response.extend(question.encode());
 
     loop {
         match udp_socket.recv_from(&mut buf) {
             Ok((size, source)) => {
                 println!("Received {} bytes from {}", size, source);
-                let response = header.encode();
-
-                udp_socket
-                    .send_to(&response, source)
-                    .expect("Failed to send response");
-
-                let response = question.encode();
-
                 udp_socket
                     .send_to(&response, source)
                     .expect("Failed to send response");
