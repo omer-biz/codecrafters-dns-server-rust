@@ -25,7 +25,7 @@ struct Header {
 impl Header {
     fn new(id: u16) -> Self {
         Self {
-            packet_id: id.to_be(),
+            packet_id: id,
             query_response_indicator: true,
             ..Self::default()
         }
