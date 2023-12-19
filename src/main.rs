@@ -300,9 +300,6 @@ impl Answer {
 fn main() {
     let udp_socket = UdpSocket::bind("127.0.0.1:2053").expect("Failed to bind to address");
     let mut buf = [0; 512];
-    let mut header = Header::new(1234);
-    header.question_count = 1;
-    header.answer_record = 1;
 
     let question = Question::new("codecrafters.io").with_type(1).with_class(1);
     let answer = Answer::new("codecrafters.io")
@@ -321,6 +318,8 @@ fn main() {
                     .truncation(false)
                     .recursion_available(false)
                     .reserved(0);
+                header.question_count = 1;
+                header.answer_record = 1;
 
                 if header.operation_code == 0 {
                     header = header.response_code(0);
