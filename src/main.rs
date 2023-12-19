@@ -103,17 +103,106 @@ impl Question {
     }
 }
 
+enum AnswerData {
+    ARecord(u32),
+}
+
+impl Default for AnswerData {
+    fn default() -> Self {
+        AnswerData::ARecord(0u32)
+    }
+}
+
+impl AnswerData {
+    fn encode(&self) -> Vec<u8> {
+        match self {
+            AnswerData::ARecord(val) => val.to_be_bytes().to_vec(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct Answer {
+    name: Vec<u8>,
+    type_: u16,
+    class: u16,
+    ttl: u32,
+    length: u16,
+    data: AnswerData,
+}
+
+impl Answer {
+    fn new(name: &str) -> Self {
+        let mut encoded_name = vec![];
+
+        for label in name.split(".") {
+            encoded_name.push(label.len() as u8);
+            encoded_name.append(&mut label.as_bytes().to_owned());
+        }
+
+        encoded_name.push(0u8);
+
+        Self {
+            name: encoded_name,
+            ..Self::default()
+        }
+    }
+
+    fn with_type(self, type_: u16) -> Self {
+        Self { type_, ..self }
+    }
+
+    fn with_class(self, class: u16) -> Self {
+        Self { class, ..self }
+    }
+
+    fn with_ttl(self, ttl: u32) -> Self {
+        Self { ttl, ..self }
+    }
+
+    fn with_length(self, length: u16) -> Self {
+        Self { length, ..self }
+    }
+
+    fn with_arcord(self, data: u32) -> Self {
+        let data = AnswerData::ARecord(data);
+        Self { data, ..self }
+    }
+
+    fn encode(&self) -> Vec<u8> {
+        let mut encoded = vec![];
+
+        encoded.extend(self.name.iter());
+        encoded.extend(self.type_.to_be_bytes().iter());
+        encoded.extend(self.class.to_be_bytes().iter());
+        encoded.extend(self.ttl.to_be_bytes().iter());
+        encoded.extend(self.length.to_be_bytes().iter());
+        encoded.extend(self.data.encode());
+
+        encoded
+    }
+}
+
 fn main() {
     let udp_socket = UdpSocket::bind("127.0.0.1:2053").expect("Failed to bind to address");
     let mut buf = [0; 512];
     let mut header = Header::new(1234);
     header.question_count = 1;
+    header.answer_record = 1;
 
     let question = Question::new("codecrafters.io").with_type(1).with_class(1);
+    let answer = Answer::new("codecrafters.io")
+        .with_type(1)
+        .with_class(1)
+        .with_ttl(60)
+        .with_length(4)
+        .with_arcord(0x08080808);
+
     let mut response = vec![];
 
     response.extend(header.encode());
     response.extend(question.encode());
+    response.extend(answer.encode());
 
     loop {
         match udp_socket.recv_from(&mut buf) {
