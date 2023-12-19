@@ -58,16 +58,71 @@ impl Header {
     }
 }
 
+#[derive(Default)]
+struct Question {
+    name: Vec<u8>,
+    type_: u16,
+    class: u16,
+}
+
+impl Question {
+    fn new(name: &str) -> Self {
+        let mut encoded_name = vec![];
+
+        for label in name.split(".") {
+            encoded_name.push(label.len() as u8);
+            encoded_name.append(&mut label.as_bytes().to_owned());
+        }
+
+        encoded_name.push(0u8);
+
+        Self {
+            name: encoded_name,
+            ..Self::default()
+        }
+    }
+
+    fn with_type(self, type_: u16) -> Self {
+        Self { type_, ..self }
+    }
+
+    fn with_class(self, class: u16) -> Self {
+        Self { class, ..self }
+    }
+
+    fn encode(&self) -> Vec<u8> {
+        let mut question_encoded = vec![];
+
+        question_encoded.append(&mut self.name.to_owned());
+        question_encoded.push((self.type_ >> 8) as u8);
+        question_encoded.push(self.type_ as u8);
+        question_encoded.push((self.class >> 8) as u8);
+        question_encoded.push(self.class as u8);
+
+        question_encoded
+    }
+}
+
 fn main() {
     let udp_socket = UdpSocket::bind("127.0.0.1:2053").expect("Failed to bind to address");
     let mut buf = [0; 512];
-    let header = Header::new(1234);
+    let mut header = Header::new(1234);
+    header.question_count = 1;
+
+    let question = Question::new("codecrafters.io").with_type(1).with_class(1);
 
     loop {
         match udp_socket.recv_from(&mut buf) {
             Ok((size, source)) => {
                 println!("Received {} bytes from {}", size, source);
                 let response = header.encode();
+
+                udp_socket
+                    .send_to(&response, source)
+                    .expect("Failed to send response");
+
+                let response = question.encode();
+
                 udp_socket
                     .send_to(&response, source)
                     .expect("Failed to send response");
