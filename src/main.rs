@@ -116,13 +116,13 @@ impl Header {
         let packet_id: u16 = (buf[0] as u16) << 8 | (buf[1] as u16);
 
         let query_response_indicator = /*-*/  buf[2] & 0b10000000 == 0b10000000;
-        let operation_code =           /*-*/  buf[2] & 0b01111000;
+        let operation_code =           /*-*/  (buf[2] & 0b01111000) >> 3;
         let authoritative_answer =     /*-*/  buf[2] & 0b00000100 == 0b00000100;
         let truncation =               /*-*/  buf[2] & 0b00000010 == 0b00000010;
         let recursion_desired =        /*-*/  buf[2] & 0b00000001 == 0b00000001;
 
         let recursion_available =      /*-*/  buf[3] & 0b10000000 == 0b10000000;
-        let reserved =                 /*-*/  buf[3] & 0b01110000;
+        let reserved =                 /*-*/  (buf[3] & 0b01110000) >> 4;
         let response_code =            /*-*/  buf[3] & 0b00001111;
 
         let question_count: u16 = (buf[4] as u16) << 8 | (buf[5] as u16);
