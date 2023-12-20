@@ -115,15 +115,15 @@ impl Header {
     fn decode(buf: &[u8]) -> Self {
         let packet_id: u16 = (buf[0] as u16) << 8 | (buf[1] as u16);
 
-        let query_response_indicator = /*-*/  buf[2] & 0b10000000 == 0b10000000;
+        let query_response_indicator = /*-*/  (buf[2] & 0b10000000) == 0b10000000;
         let operation_code =           /*-*/  (buf[2] & 0b01111000) >> 3;
-        let authoritative_answer =     /*-*/  buf[2] & 0b00000100 == 0b00000100;
-        let truncation =               /*-*/  buf[2] & 0b00000010 == 0b00000010;
-        let recursion_desired =        /*-*/  buf[2] & 0b00000001 == 0b00000001;
+        let authoritative_answer =     /*-*/  (buf[2] & 0b00000100) == 0b00000100;
+        let truncation =               /*-*/  (buf[2] & 0b00000010) == 0b00000010;
+        let recursion_desired =        /*-*/  (buf[2] & 0b00000001) == 0b00000001;
 
-        let recursion_available =      /*-*/  buf[3] & 0b10000000 == 0b10000000;
+        let recursion_available =      /*-*/  (buf[3] & 0b10000000) == 0b10000000;
         let reserved =                 /*-*/  (buf[3] & 0b01110000) >> 4;
-        let response_code =            /*-*/  buf[3] & 0b00001111;
+        let response_code =            /*-*/  (buf[3] & 0b00001111);
 
         let question_count: u16 = (buf[4] as u16) << 8 | (buf[5] as u16);
         let answer_record: u16 = (buf[6] as u16) << 8 | (buf[7] as u16);
@@ -174,7 +174,7 @@ impl Header {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct Question {
     name: Vec<u8>,
     type_: u16,
@@ -183,6 +183,13 @@ struct Question {
 
 impl Question {
     fn new(name: &str) -> Self {
+        Self {
+            name: Self::encode_name(name),
+            ..Self::default()
+        }
+    }
+
+    fn encode_name(name: &str) -> Vec<u8> {
         let mut encoded_name = vec![];
 
         for label in name.split(".") {
@@ -192,10 +199,7 @@ impl Question {
 
         encoded_name.push(0u8);
 
-        Self {
-            name: encoded_name,
-            ..Self::default()
-        }
+        encoded_name
     }
 
     fn with_type(self, type_: u16) -> Self {
@@ -204,6 +208,13 @@ impl Question {
 
     fn with_class(self, class: u16) -> Self {
         Self { class, ..self }
+    }
+
+    fn with_name(self, name: &str) -> Self {
+        Self {
+            name: Self::encode_name(name),
+            ..self
+        }
     }
 
     fn encode(&self) -> Vec<u8> {
@@ -215,8 +226,33 @@ impl Question {
 
         question_encoded
     }
+
+    fn size(&self) -> usize {
+        self.name.len() + 2 + 2
+    }
+
+    fn decode(buf: &[u8]) -> Self {
+        let mut size = 0;
+        let mut name = vec![];
+
+        while buf[size] != 0x00 {
+            name.push(buf[size]);
+            size += 1;
+        }
+
+        name.push(0u8);
+        size += 1; // consume the null byte
+
+        let type_: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
+        size += 2;
+        let class: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
+        size += 2;
+
+        Question { name, type_, class }
+    }
 }
 
+#[derive(Debug)]
 enum AnswerData {
     ARecord(u32),
 }
@@ -235,7 +271,7 @@ impl AnswerData {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct Answer {
     name: Vec<u8>,
     type_: u16,
@@ -247,6 +283,56 @@ struct Answer {
 
 impl Answer {
     fn new(name: &str) -> Self {
+        Self {
+            name: Self::encode_name(name),
+            ..Self::default()
+        }
+    }
+
+    fn decode(buf: &[u8]) -> Self {
+        let mut size = 0;
+        let mut name = vec![];
+
+        while buf[size] != 0x00 {
+            name.push(buf[size]);
+            size += 1;
+        }
+
+        name.push(0u8);
+        size += 1; // consume the null byte
+
+        let type_: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
+        size += 2;
+        let class: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
+        size += 2;
+
+        let ttl: u32 = (buf[size] as u32) << 24
+            | (buf[size + 1] as u32) << 16
+            | (buf[size + 2] as u32) << 8
+            | (buf[size + 3]) as u32;
+        size += 4;
+
+        let length: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
+        size += 2;
+
+        let data = AnswerData::ARecord(0x08080808);
+        size += 4;
+
+        Answer {
+            name,
+            type_,
+            class,
+            ttl,
+            length,
+            data,
+        }
+    }
+
+    fn size(&self) -> usize {
+        self.name.len() + 2 + 2 + 4 + 2 + 4
+    }
+
+    fn encode_name(name: &str) -> Vec<u8> {
         let mut encoded_name = vec![];
 
         for label in name.split(".") {
@@ -256,10 +342,7 @@ impl Answer {
 
         encoded_name.push(0u8);
 
-        Self {
-            name: encoded_name,
-            ..Self::default()
-        }
+        encoded_name
     }
 
     fn with_type(self, type_: u16) -> Self {
@@ -301,18 +384,10 @@ fn main() {
     let udp_socket = UdpSocket::bind("127.0.0.1:2053").expect("Failed to bind to address");
     let mut buf = [0; 512];
 
-    let question = Question::new("codecrafters.io").with_type(1).with_class(1);
-    let answer = Answer::new("codecrafters.io")
-        .with_type(1)
-        .with_class(1)
-        .with_ttl(60)
-        .with_length(4)
-        .with_arcord(0x08080808);
-
     loop {
         match udp_socket.recv_from(&mut buf) {
             Ok((size, source)) => {
-                let mut header = Header::decode(&buf)
+                let mut header = Header::decode(&buf[..12])
                     .query_response_indicator(true)
                     .authoritative_answer(false)
                     .truncation(false)
@@ -326,6 +401,13 @@ fn main() {
                 } else {
                     header = header.response_code(4);
                 }
+
+                let question = Question::decode(&buf[12..]).with_type(1).with_class(1);
+                let answer = Answer::decode(&buf[question.size()..])
+                    .with_type(1)
+                    .with_class(1)
+                    .with_ttl(60)
+                    .with_length(4);
 
                 let mut response = vec![];
 
