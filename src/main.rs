@@ -403,7 +403,7 @@ fn main() {
                 }
 
                 let question = Question::decode(&buf[12..]).with_type(1).with_class(1);
-                let answer = Answer::decode(&buf[question.size()..])
+                let answer = Answer::decode(&buf[12..])
                     .with_type(1)
                     .with_class(1)
                     .with_ttl(60)
