@@ -123,7 +123,7 @@ impl Header {
 
         let recursion_available =      /*-*/  (buf[3] & 0b10000000) == 0b10000000;
         let reserved =                 /*-*/  (buf[3] & 0b01110000) >> 4;
-        let response_code =            /*-*/  (buf[3] & 0b00001111);
+        let response_code =            /*-*/   buf[3] & 0b00001111;
 
         let question_count: u16 = (buf[4] as u16) << 8 | (buf[5] as u16);
         let answer_record: u16 = (buf[6] as u16) << 8 | (buf[7] as u16);
@@ -174,7 +174,7 @@ impl Header {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 struct Question {
     name: Vec<u8>,
     type_: u16,
@@ -194,7 +194,7 @@ impl Question {
 
         for label in name.split(".") {
             encoded_name.push(label.len() as u8);
-            encoded_name.append(&mut label.as_bytes().to_owned());
+            encoded_name.extend(label.as_bytes().to_owned());
         }
 
         encoded_name.push(0u8);
@@ -220,7 +220,7 @@ impl Question {
     fn encode(&self) -> Vec<u8> {
         let mut question_encoded = vec![];
 
-        question_encoded.extend(self.name.to_owned());
+        question_encoded.extend(self.name.iter());
         question_encoded.extend(self.type_.to_be_bytes());
         question_encoded.extend(self.class.to_be_bytes());
 
@@ -231,11 +231,21 @@ impl Question {
         self.name.len() + 2 + 2
     }
 
-    fn decode(buf: &[u8]) -> Self {
-        let mut size = 0;
+    fn decode(buf: &[u8], offset: u16) -> Self {
+        let mut size = offset as usize;
         let mut name = vec![];
 
         while buf[size] != 0x00 {
+            if buf[size] & 0xc0 == 0xc0 {
+                let offset = ((buf[size] & 0x3f) as u16) << 8 | (buf[size + 1] as u16);
+                size = offset as usize;
+                // if there is a pointer this algorithm will
+                // poplute the current questions type and
+                // class with the pointer's type and class.
+                //
+                // btw I'm still confused by big endian and little endian.
+                // I know what they are but still, confused.
+            }
             name.push(buf[size]);
             size += 1;
         }
@@ -246,13 +256,12 @@ impl Question {
         let type_: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
         size += 2;
         let class: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
-        size += 2;
 
         Question { name, type_, class }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum AnswerData {
     ARecord(u32),
 }
@@ -271,7 +280,7 @@ impl AnswerData {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 struct Answer {
     name: Vec<u8>,
     type_: u16,
@@ -337,12 +346,16 @@ impl Answer {
 
         for label in name.split(".") {
             encoded_name.push(label.len() as u8);
-            encoded_name.append(&mut label.as_bytes().to_owned());
+            encoded_name.extend(label.as_bytes().to_owned());
         }
 
         encoded_name.push(0u8);
 
         encoded_name
+    }
+
+    fn with_name(self, name: Vec<u8>) -> Self {
+        Self { name, ..self }
     }
 
     fn with_type(self, type_: u16) -> Self {
@@ -380,6 +393,59 @@ impl Answer {
     }
 }
 
+#[derive(Default)]
+struct Message {
+    header: Header,
+    questions: Vec<Question>,
+    answers: Vec<Answer>,
+}
+
+impl Message {
+    fn encode(&self) -> Vec<u8> {
+        let mut encoded = vec![];
+
+        encoded.extend(self.header.encode());
+        encoded.extend(self.questions.iter().flat_map(|q| q.encode()));
+        encoded.extend(self.answers.iter().flat_map(|a| a.encode()));
+
+        encoded
+    }
+
+    fn with_header(self, header: Header) -> Self {
+        Self { header, ..self }
+    }
+
+    fn with_questions(self, questions: Vec<Question>) -> Self {
+        Self {
+            header: self.header.question_count(questions.len() as u16),
+            questions,
+            ..self
+        }
+    }
+
+    fn with_answers(self, answers: Vec<Answer>) -> Self {
+        Self {
+            header: self.header.answer_record(answers.len() as u16),
+            answers,
+            ..self
+        }
+    }
+}
+
+fn decode_questions(nofq: u16, buf: &[u8]) -> Vec<Question> {
+    let mut questions = vec![];
+    let mut question_offset = 12;
+
+    for _ in 0..nofq {
+        let q = Question::decode(buf, question_offset);
+        question_offset = q.size() as u16;
+
+        questions.push(q);
+    }
+
+    questions
+}
+
 fn main() {
     let udp_socket = UdpSocket::bind("127.0.0.1:2053").expect("Failed to bind to address");
     let mut buf = [0; 512];
@@ -393,8 +459,6 @@ fn main() {
                     .truncation(false)
                     .recursion_available(false)
                     .reserved(0);
-                header.question_count = 1;
-                header.answer_record = 1;
 
                 if header.operation_code == 0 {
                     header = header.response_code(0);
@@ -402,22 +466,29 @@ fn main() {
                     header = header.response_code(4);
                 }
 
-                let question = Question::decode(&buf[12..]).with_type(1).with_class(1);
-                let answer = Answer::decode(&buf[12..])
-                    .with_type(1)
-                    .with_class(1)
-                    .with_ttl(60)
-                    .with_length(4);
+                let questions = decode_questions(header.question_count, &buf);
 
-                let mut response = vec![];
+                let answers = questions
+                    .iter()
+                    .map(|q| {
+                        Answer::default()
+                            .with_name(q.name.clone())
+                            .with_type(1)
+                            .with_class(1)
+                            .with_ttl(60)
+                            .with_length(4)
+                            .with_arcord(0x09090101)
+                    })
+                    .collect();
 
-                response.extend(header.encode());
-                response.extend(question.encode());
-                response.extend(answer.encode());
+                let response = Message::default()
+                    .with_questions(questions)
+                    .with_header(header)
+                    .with_answers(answers);
 
                 println!("Received {} bytes from {}", size, source);
                 udp_socket
-                    .send_to(&response, source)
+                    .send_to(&response.encode(), source)
                     .expect("Failed to send response");
             }
             Err(e) => {
