@@ -23,17 +23,17 @@ struct Header {
 }
 
 impl Header {
-    fn new(id: u16) -> Self {
-        Self {
-            packet_id: id,
-            query_response_indicator: true,
-            ..Self::default()
-        }
-    }
+    // fn new(id: u16) -> Self {
+    //     Self {
+    //         packet_id: id,
+    //         query_response_indicator: true,
+    //         ..Self::default()
+    //     }
+    // }
 
-    fn packet_id(self, packet_id: u16) -> Self {
-        Self { packet_id, ..self }
-    }
+    // fn packet_id(self, packet_id: u16) -> Self {
+    //     Self { packet_id, ..self }
+    // }
 
     fn query_response_indicator(self, query_response_indicator: bool) -> Self {
         Self {
@@ -42,42 +42,42 @@ impl Header {
         }
     }
 
-    fn operation_code(self, operation_code: u8) -> Self {
-        Self {
-            operation_code,
-            ..self
-        }
-    }
-
+    // fn operation_code(self, operation_code: u8) -> Self {
+    //     Self {
+    //         operation_code,
+    //         ..self
+    //     }
+    // }
+    //
     fn authoritative_answer(self, authoritative_answer: bool) -> Self {
         Self {
             authoritative_answer,
             ..self
         }
     }
-
+    //
     fn truncation(self, truncation: bool) -> Self {
         Self { truncation, ..self }
     }
-
-    fn recursion_desired(self, recursion_desired: bool) -> Self {
-        Self {
-            recursion_desired,
-            ..self
-        }
-    }
-
+    //
+    // fn recursion_desired(self, recursion_desired: bool) -> Self {
+    //     Self {
+    //         recursion_desired,
+    //         ..self
+    //     }
+    // }
+    //
     fn recursion_available(self, recursion_available: bool) -> Self {
         Self {
             recursion_available,
             ..self
         }
     }
-
+    //
     fn reserved(self, reserved: u8) -> Self {
         Self { reserved, ..self }
     }
-
+    //
     fn response_code(self, response_code: u8) -> Self {
         Self {
             response_code,
@@ -98,19 +98,19 @@ impl Header {
         }
     }
 
-    fn authority_record_count(self, authority_record_count: u16) -> Self {
-        Self {
-            authority_record_count,
-            ..self
-        }
-    }
-
-    fn additional_record_count(self, additional_record_count: u16) -> Self {
-        Self {
-            additional_record_count,
-            ..self
-        }
-    }
+    // fn authority_record_count(self, authority_record_count: u16) -> Self {
+    //     Self {
+    //         authority_record_count,
+    //         ..self
+    //     }
+    // }
+    //
+    // fn additional_record_count(self, additional_record_count: u16) -> Self {
+    //     Self {
+    //         additional_record_count,
+    //         ..self
+    //     }
+    // }
 
     fn decode(buf: &[u8]) -> Self {
         let packet_id: u16 = (buf[0] as u16) << 8 | (buf[1] as u16);
@@ -182,40 +182,40 @@ struct Question {
 }
 
 impl Question {
-    fn new(name: &str) -> Self {
-        Self {
-            name: Self::encode_name(name),
-            ..Self::default()
-        }
-    }
-
-    fn encode_name(name: &str) -> Vec<u8> {
-        let mut encoded_name = vec![];
-
-        for label in name.split(".") {
-            encoded_name.push(label.len() as u8);
-            encoded_name.extend(label.as_bytes().to_owned());
-        }
-
-        encoded_name.push(0u8);
-
-        encoded_name
-    }
-
-    fn with_type(self, type_: u16) -> Self {
-        Self { type_, ..self }
-    }
-
-    fn with_class(self, class: u16) -> Self {
-        Self { class, ..self }
-    }
-
-    fn with_name(self, name: &str) -> Self {
-        Self {
-            name: Self::encode_name(name),
-            ..self
-        }
-    }
+    // fn new(name: &str) -> Self {
+    //     Self {
+    //         name: Self::encode_name(name),
+    //         ..Self::default()
+    //     }
+    // }
+    //
+    // fn encode_name(name: &str) -> Vec<u8> {
+    //     let mut encoded_name = vec![];
+    //
+    //     for label in name.split(".") {
+    //         encoded_name.push(label.len() as u8);
+    //         encoded_name.extend(label.as_bytes().to_owned());
+    //     }
+    //
+    //     encoded_name.push(0u8);
+    //
+    //     encoded_name
+    // }
+    //
+    // fn with_type(self, type_: u16) -> Self {
+    //     Self { type_, ..self }
+    // }
+    //
+    // fn with_class(self, class: u16) -> Self {
+    //     Self { class, ..self }
+    // }
+    //
+    // fn with_name(self, name: &str) -> Self {
+    //     Self {
+    //         name: Self::encode_name(name),
+    //         ..self
+    //     }
+    // }
 
     fn encode(&self) -> Vec<u8> {
         let mut question_encoded = vec![];
@@ -237,7 +237,13 @@ impl Question {
 
         while buf[size] != 0x00 {
             if buf[size] & 0xc0 == 0xc0 {
-                let offset = ((buf[size] & 0x3f) as u16) << 8 | (buf[size + 1] as u16);
+                let offset =
+                    ((buf[size] as u16) << 8 | (buf[size + 1] as u16)) & 0b0011111111111111;
+
+                if offset > 512 {
+                    panic!("out of bounds")
+                }
+
                 size = offset as usize;
                 // if there is a pointer this algorithm will
                 // poplute the current questions type and
@@ -291,68 +297,68 @@ struct Answer {
 }
 
 impl Answer {
-    fn new(name: &str) -> Self {
-        Self {
-            name: Self::encode_name(name),
-            ..Self::default()
-        }
-    }
+    // fn new(name: &str) -> Self {
+    //     Self {
+    //         name: Self::encode_name(name),
+    //         ..Self::default()
+    //     }
+    // }
 
-    fn decode(buf: &[u8]) -> Self {
-        let mut size = 0;
-        let mut name = vec![];
+    // fn decode(buf: &[u8]) -> Self {
+    // let mut size = 0;
+    // let mut name = vec![];
+    //
+    // while buf[size] != 0x00 {
+    //     name.push(buf[size]);
+    //     size += 1;
+    // }
+    //
+    // name.push(0u8);
+    // size += 1; // consume the null byte
+    //
+    // let type_: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
+    // size += 2;
+    // let class: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
+    // size += 2;
+    //
+    // let ttl: u32 = (buf[size] as u32) << 24
+    //     | (buf[size + 1] as u32) << 16
+    //     | (buf[size + 2] as u32) << 8
+    //     | (buf[size + 3]) as u32;
+    // size += 4;
+    //
+    // let length: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
+    // size += 2;
+    //
+    // let data = AnswerData::ARecord(0x08080808);
+    // size += 4;
+    //
+    // Answer {
+    //     name,
+    //     type_,
+    //     class,
+    //     ttl,
+    //     length,
+    //     data,
+    // }
+    // }
 
-        while buf[size] != 0x00 {
-            name.push(buf[size]);
-            size += 1;
-        }
+    // fn size(&self) -> usize {
+    //     self.name.len() + 2 + 2 + 4 + 2 + 4
+    // }
 
-        name.push(0u8);
-        size += 1; // consume the null byte
-
-        let type_: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
-        size += 2;
-        let class: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
-        size += 2;
-
-        let ttl: u32 = (buf[size] as u32) << 24
-            | (buf[size + 1] as u32) << 16
-            | (buf[size + 2] as u32) << 8
-            | (buf[size + 3]) as u32;
-        size += 4;
-
-        let length: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
-        size += 2;
-
-        let data = AnswerData::ARecord(0x08080808);
-        size += 4;
-
-        Answer {
-            name,
-            type_,
-            class,
-            ttl,
-            length,
-            data,
-        }
-    }
-
-    fn size(&self) -> usize {
-        self.name.len() + 2 + 2 + 4 + 2 + 4
-    }
-
-    fn encode_name(name: &str) -> Vec<u8> {
-        let mut encoded_name = vec![];
-
-        for label in name.split(".") {
-            encoded_name.push(label.len() as u8);
-            encoded_name.extend(label.as_bytes().to_owned());
-        }
-
-        encoded_name.push(0u8);
-
-        encoded_name
-    }
+    // fn encode_name(name: &str) -> Vec<u8> {
+    //     let mut encoded_name = vec![];
+    //
+    //     for label in name.split(".") {
+    //         encoded_name.push(label.len() as u8);
+    //         encoded_name.extend(label.as_bytes().to_owned());
+    //     }
+    //
+    //     encoded_name.push(0u8);
+    //
+    //     encoded_name
+    // }
 
     fn with_name(self, name: Vec<u8>) -> Self {
         Self { name, ..self }
@@ -438,7 +444,7 @@ fn decode_questions(nofq: u16, buf: &[u8]) -> Vec<Question> {
 
     for _ in 0..nofq {
         let q = Question::decode(buf, question_offset);
-        question_offset = q.size() as u16;
+        question_offset += q.size() as u16;
 
         questions.push(q);
     }
