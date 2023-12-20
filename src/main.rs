@@ -1,8 +1,8 @@
-use std::net::UdpSocket;
+use std::{env::args, net::UdpSocket};
 
 // The whole must be 12 bytes when encoded.
 // which is 3 x 4 bytes.
-#[derive(Default, PartialEq, Debug)]
+#[derive(Default, PartialEq, Debug, Clone)]
 struct Header {
     packet_id: u16, // 16 bit
 
@@ -304,48 +304,62 @@ impl Answer {
     //     }
     // }
 
-    // fn decode(buf: &[u8]) -> Self {
-    // let mut size = 0;
-    // let mut name = vec![];
-    //
-    // while buf[size] != 0x00 {
-    //     name.push(buf[size]);
-    //     size += 1;
-    // }
-    //
-    // name.push(0u8);
-    // size += 1; // consume the null byte
-    //
-    // let type_: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
-    // size += 2;
-    // let class: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
-    // size += 2;
-    //
-    // let ttl: u32 = (buf[size] as u32) << 24
-    //     | (buf[size + 1] as u32) << 16
-    //     | (buf[size + 2] as u32) << 8
-    //     | (buf[size + 3]) as u32;
-    // size += 4;
-    //
-    // let length: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
-    // size += 2;
-    //
-    // let data = AnswerData::ARecord(0x08080808);
-    // size += 4;
-    //
-    // Answer {
-    //     name,
-    //     type_,
-    //     class,
-    //     ttl,
-    //     length,
-    //     data,
-    // }
-    // }
+    fn decode(buf: &[u8], offset: u16) -> Self {
+        let mut size = offset as usize;
+        let mut name = vec![];
 
-    // fn size(&self) -> usize {
-    //     self.name.len() + 2 + 2 + 4 + 2 + 4
-    // }
+        while buf[size] != 0x00 {
+            if buf[size] & 0xc0 == 0xc0 {
+                let offset =
+                    ((buf[size] as u16) << 8 | (buf[size + 1] as u16)) & 0b0011111111111111;
+
+                if offset > 512 {
+                    panic!("out of bounds")
+                }
+
+                size = offset as usize;
+                // if there is a pointer this algorithm will
+                // poplute the current questions type and
+                // class with the pointer's type and class.
+                //
+                // btw I'm still confused by big endian and little endian.
+                // I know what they are but still, confused.
+            }
+            name.push(buf[size]);
+            size += 1;
+        }
+
+        name.push(0u8);
+        size += 1; // consume the null byte
+
+        let type_: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
+        size += 2;
+        let class: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
+        size += 2;
+
+        let ttl: u32 = (buf[size] as u32) << 24
+            | (buf[size + 1] as u32) << 16
+            | (buf[size + 2] as u32) << 8
+            | (buf[size + 3]) as u32;
+        size += 4;
+
+        let length: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
+
+        let data = AnswerData::ARecord(0x08080808);
+
+        Answer {
+            name,
+            type_,
+            class,
+            ttl,
+            length,
+            data,
+        }
+    }
+
+    fn size(&self) -> usize {
+        self.name.len() + 2 + 2 + 4 + 2 + 4
+    }
 
     // fn encode_name(name: &str) -> Vec<u8> {
     //     let mut encoded_name = vec![];
@@ -399,7 +413,7 @@ impl Answer {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Message {
     header: Header,
     questions: Vec<Question>,
@@ -452,13 +466,29 @@ fn decode_questions(nofq: u16, buf: &[u8]) -> Vec<Question> {
     questions
 }
 
+fn decode_answers(nofa: u16, buf: &[u8], offset: u16) -> Vec<Answer> {
+    let mut answers = vec![];
+    let mut answer_offset = offset;
+
+    for _ in 0..nofa {
+        let a = Answer::decode(buf, answer_offset);
+        answer_offset += a.size() as u16;
+        answers.push(a);
+    }
+
+    answers
+}
+
 fn main() {
     let udp_socket = UdpSocket::bind("127.0.0.1:2053").expect("Failed to bind to address");
     let mut buf = [0; 512];
 
+    let resolver = args().nth(2).expect("Resolver not specified");
+    let resolver_udp = UdpSocket::bind("127.0.0.1:9001").expect("Failed to bind to address");
+
     loop {
         match udp_socket.recv_from(&mut buf) {
-            Ok((size, source)) => {
+            Ok((_, source)) => {
                 let mut header = Header::decode(&buf[..12])
                     .query_response_indicator(true)
                     .authoritative_answer(false)
@@ -473,7 +503,6 @@ fn main() {
                 }
 
                 let questions = decode_questions(header.question_count, &buf);
-
                 let answers = questions
                     .iter()
                     .map(|q| {
@@ -488,14 +517,58 @@ fn main() {
                     .collect();
 
                 let response = Message::default()
-                    .with_questions(questions)
-                    .with_header(header)
+                    .with_header(header.clone())
+                    .with_questions(questions.clone())
                     .with_answers(answers);
 
-                println!("Received {} bytes from {}", size, source);
-                udp_socket
-                    .send_to(&response.encode(), source)
-                    .expect("Failed to send response");
+                let question_messages: Vec<Message> = split_questions(&response);
+
+                if header.question_count > 1 {
+                    let mut response_answers = vec![];
+                    for question_message in question_messages.iter() {
+                        let mut innber_buf = [0; 512];
+                        resolver_udp
+                            .send_to(&question_message.encode(), &resolver)
+                            .expect("Unable to send to resolver");
+
+                        let (_, _) = resolver_udp
+                            .recv_from(&mut innber_buf)
+                            .expect("Failed to recieve from resolver");
+
+                        let mut r_header = Header::decode(&innber_buf[..12])
+                            .query_response_indicator(true)
+                            .authoritative_answer(false)
+                            .truncation(false)
+                            .recursion_available(false)
+                            .reserved(0);
+
+                        if r_header.operation_code == 0 {
+                            r_header = r_header.response_code(0);
+                        } else {
+                            r_header = r_header.response_code(4);
+                        };
+
+                        let questions = decode_questions(r_header.question_count, &buf);
+                        let offset: u16 = questions.iter().map(|q| q.size() as u16).sum();
+
+                        let answers = decode_answers(r_header.answer_record, &buf, offset + 12);
+
+                        response_answers.extend(answers);
+                    }
+
+                    let response = Message::default()
+                        .with_header(header)
+                        .with_questions(questions)
+                        .with_answers(response_answers);
+
+                    udp_socket
+                        .send_to(&response.encode(), source)
+                        .expect("Failed to send response");
+                } else {
+                    udp_socket
+                        .send_to(&response.encode(), source)
+                        .expect("Failed to send response");
+                }
             }
             Err(e) => {
                 eprintln!("Error receiving data: {}", e);
@@ -503,4 +576,14 @@ fn main() {
             }
         }
     }
+}
+
+fn split_questions(message: &Message) -> Vec<Message> {
+    let mut messages = vec![];
+
+    for question in message.questions.iter() {
+        messages.push(message.clone().with_questions(vec![question.clone()]));
+    }
+
+    messages
 }
