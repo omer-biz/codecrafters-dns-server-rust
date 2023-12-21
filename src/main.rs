@@ -23,17 +23,13 @@ struct Header {
 }
 
 impl Header {
-    // fn new(id: u16) -> Self {
-    //     Self {
-    //         packet_id: id,
-    //         query_response_indicator: true,
-    //         ..Self::default()
-    //     }
-    // }
-
-    // fn packet_id(self, packet_id: u16) -> Self {
-    //     Self { packet_id, ..self }
-    // }
+    fn new(id: u16) -> Self {
+        Self {
+            packet_id: id,
+            query_response_indicator: true,
+            ..Self::default()
+        }
+    }
 
     fn query_response_indicator(self, query_response_indicator: bool) -> Self {
         Self {
@@ -42,42 +38,42 @@ impl Header {
         }
     }
 
-    // fn operation_code(self, operation_code: u8) -> Self {
-    //     Self {
-    //         operation_code,
-    //         ..self
-    //     }
-    // }
-    //
+    fn operation_code(self, operation_code: u8) -> Self {
+        Self {
+            operation_code,
+            ..self
+        }
+    }
+
     fn authoritative_answer(self, authoritative_answer: bool) -> Self {
         Self {
             authoritative_answer,
             ..self
         }
     }
-    //
+
     fn truncation(self, truncation: bool) -> Self {
         Self { truncation, ..self }
     }
-    //
-    // fn recursion_desired(self, recursion_desired: bool) -> Self {
-    //     Self {
-    //         recursion_desired,
-    //         ..self
-    //     }
-    // }
-    //
+
+    fn recursion_desired(self, recursion_desired: bool) -> Self {
+        Self {
+            recursion_desired,
+            ..self
+        }
+    }
+
     fn recursion_available(self, recursion_available: bool) -> Self {
         Self {
             recursion_available,
             ..self
         }
     }
-    //
+
     fn reserved(self, reserved: u8) -> Self {
         Self { reserved, ..self }
     }
-    //
+
     fn response_code(self, response_code: u8) -> Self {
         Self {
             response_code,
@@ -97,20 +93,6 @@ impl Header {
             ..self
         }
     }
-
-    // fn authority_record_count(self, authority_record_count: u16) -> Self {
-    //     Self {
-    //         authority_record_count,
-    //         ..self
-    //     }
-    // }
-    //
-    // fn additional_record_count(self, additional_record_count: u16) -> Self {
-    //     Self {
-    //         additional_record_count,
-    //         ..self
-    //     }
-    // }
 
     fn decode(buf: &[u8]) -> Self {
         let packet_id: u16 = (buf[0] as u16) << 8 | (buf[1] as u16);
@@ -182,41 +164,6 @@ struct Question {
 }
 
 impl Question {
-    // fn new(name: &str) -> Self {
-    //     Self {
-    //         name: Self::encode_name(name),
-    //         ..Self::default()
-    //     }
-    // }
-    //
-    // fn encode_name(name: &str) -> Vec<u8> {
-    //     let mut encoded_name = vec![];
-    //
-    //     for label in name.split(".") {
-    //         encoded_name.push(label.len() as u8);
-    //         encoded_name.extend(label.as_bytes().to_owned());
-    //     }
-    //
-    //     encoded_name.push(0u8);
-    //
-    //     encoded_name
-    // }
-    //
-    // fn with_type(self, type_: u16) -> Self {
-    //     Self { type_, ..self }
-    // }
-    //
-    // fn with_class(self, class: u16) -> Self {
-    //     Self { class, ..self }
-    // }
-    //
-    // fn with_name(self, name: &str) -> Self {
-    //     Self {
-    //         name: Self::encode_name(name),
-    //         ..self
-    //     }
-    // }
-
     fn encode(&self) -> Vec<u8> {
         let mut question_encoded = vec![];
 
@@ -240,7 +187,7 @@ impl Question {
                 let offset =
                     ((buf[size] as u16) << 8 | (buf[size + 1] as u16)) & 0b0011111111111111;
 
-                if offset > 512 {
+                if offset > 1024 {
                     panic!("out of bounds")
                 }
 
@@ -297,13 +244,6 @@ struct Answer {
 }
 
 impl Answer {
-    // fn new(name: &str) -> Self {
-    //     Self {
-    //         name: Self::encode_name(name),
-    //         ..Self::default()
-    //     }
-    // }
-
     fn decode(buf: &[u8], offset: u16) -> Self {
         let mut size = offset as usize;
         let mut name = vec![];
@@ -313,7 +253,7 @@ impl Answer {
                 let offset =
                     ((buf[size] as u16) << 8 | (buf[size + 1] as u16)) & 0b0011111111111111;
 
-                if offset > 512 {
+                if offset > 1024 {
                     panic!("out of bounds")
                 }
 
@@ -330,7 +270,7 @@ impl Answer {
         }
 
         name.push(0u8);
-        size += 1; // consume the null byte
+        size = name.len() + (offset as usize);
 
         let type_: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
         size += 2;
@@ -344,8 +284,14 @@ impl Answer {
         size += 4;
 
         let length: u16 = (buf[size] as u16) << 8 | (buf[size + 1] as u16);
+        size += 2;
 
-        let data = AnswerData::ARecord(0x08080808);
+        let ip: u32 = (buf[size] as u32) << 24
+            | (buf[size + 1] as u32) << 16
+            | (buf[size + 2] as u32) << 8
+            | (buf[size + 3]) as u32;
+
+        let data = AnswerData::ARecord(ip);
 
         Answer {
             name,
@@ -359,44 +305,6 @@ impl Answer {
 
     fn size(&self) -> usize {
         self.name.len() + 2 + 2 + 4 + 2 + 4
-    }
-
-    // fn encode_name(name: &str) -> Vec<u8> {
-    //     let mut encoded_name = vec![];
-    //
-    //     for label in name.split(".") {
-    //         encoded_name.push(label.len() as u8);
-    //         encoded_name.extend(label.as_bytes().to_owned());
-    //     }
-    //
-    //     encoded_name.push(0u8);
-    //
-    //     encoded_name
-    // }
-
-    fn with_name(self, name: Vec<u8>) -> Self {
-        Self { name, ..self }
-    }
-
-    fn with_type(self, type_: u16) -> Self {
-        Self { type_, ..self }
-    }
-
-    fn with_class(self, class: u16) -> Self {
-        Self { class, ..self }
-    }
-
-    fn with_ttl(self, ttl: u32) -> Self {
-        Self { ttl, ..self }
-    }
-
-    fn with_length(self, length: u16) -> Self {
-        Self { length, ..self }
-    }
-
-    fn with_arcord(self, data: u32) -> Self {
-        let data = AnswerData::ARecord(data);
-        Self { data, ..self }
     }
 
     fn encode(&self) -> Vec<u8> {
@@ -413,7 +321,7 @@ impl Answer {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 struct Message {
     header: Header,
     questions: Vec<Question>,
@@ -481,94 +389,73 @@ fn decode_answers(nofa: u16, buf: &[u8], offset: u16) -> Vec<Answer> {
 
 fn main() {
     let udp_socket = UdpSocket::bind("127.0.0.1:2053").expect("Failed to bind to address");
-    let mut buf = [0; 512];
+    let mut buf = [0; 1024];
 
     let resolver = args().nth(2).expect("Resolver not specified");
-    let resolver_udp = UdpSocket::bind("127.0.0.1:9001").expect("Failed to bind to address");
+    let resolver_udp = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind to address");
 
     loop {
         match udp_socket.recv_from(&mut buf) {
             Ok((_, source)) => {
-                let mut header = Header::decode(&buf[..12])
+                let header = Header::decode(&buf[..12]);
+                let mut questions = vec![];
+
+                if header.query_response_indicator == false && header.question_count > 0 {
+                    questions = decode_questions(header.question_count, &buf);
+                }
+
+                let mut response_questions = vec![];
+                let mut response_answers = vec![];
+                for question in questions {
+                    let mut innber_buf = [0; 1024];
+                    let query = Message::default()
+                        .with_header(header.clone())
+                        .with_questions(vec![question]);
+
+                    resolver_udp
+                        .send_to(&query.encode(), &resolver)
+                        .expect("Unable to send to resolver");
+
+                    let (size, _) = resolver_udp
+                        .recv_from(&mut innber_buf)
+                        .expect("Failed to recieve from resolver");
+
+                    let r_header = Header::decode(&innber_buf[..12]);
+
+                    let questions = decode_questions(r_header.question_count, &innber_buf[..size]);
+                    let offset: u16 = questions.iter().map(|q| q.size() as u16).sum();
+                    response_questions.extend(questions);
+
+                    let answers =
+                        decode_answers(r_header.answer_record, &innber_buf[..size], offset + 12);
+
+                    response_answers.extend(answers);
+                }
+
+                let mut header = Header::new(header.packet_id)
                     .query_response_indicator(true)
                     .authoritative_answer(false)
                     .truncation(false)
                     .recursion_available(false)
+                    .recursion_desired(header.recursion_desired)
+                    .operation_code(header.operation_code)
+                    .truncation(header.truncation)
                     .reserved(0);
 
                 if header.operation_code == 0 {
                     header = header.response_code(0);
                 } else {
                     header = header.response_code(4);
-                }
-
-                let questions = decode_questions(header.question_count, &buf);
-                let answers = questions
-                    .iter()
-                    .map(|q| {
-                        Answer::default()
-                            .with_name(q.name.clone())
-                            .with_type(1)
-                            .with_class(1)
-                            .with_ttl(60)
-                            .with_length(4)
-                            .with_arcord(0x09090101)
-                    })
-                    .collect();
+                };
 
                 let response = Message::default()
                     .with_header(header.clone())
-                    .with_questions(questions.clone())
-                    .with_answers(answers);
+                    .with_questions(response_questions)
+                    .with_answers(response_answers);
 
-                let question_messages: Vec<Message> = split_questions(&response);
-
-                if header.question_count > 1 {
-                    let mut response_answers = vec![];
-                    for question_message in question_messages.iter() {
-                        let mut innber_buf = [0; 512];
-                        resolver_udp
-                            .send_to(&question_message.encode(), &resolver)
-                            .expect("Unable to send to resolver");
-
-                        let (_, _) = resolver_udp
-                            .recv_from(&mut innber_buf)
-                            .expect("Failed to recieve from resolver");
-
-                        let mut r_header = Header::decode(&innber_buf[..12])
-                            .query_response_indicator(true)
-                            .authoritative_answer(false)
-                            .truncation(false)
-                            .recursion_available(false)
-                            .reserved(0);
-
-                        if r_header.operation_code == 0 {
-                            r_header = r_header.response_code(0);
-                        } else {
-                            r_header = r_header.response_code(4);
-                        };
-
-                        let questions = decode_questions(r_header.question_count, &buf);
-                        let offset: u16 = questions.iter().map(|q| q.size() as u16).sum();
-
-                        let answers = decode_answers(r_header.answer_record, &buf, offset + 12);
-
-                        response_answers.extend(answers);
-                    }
-
-                    let response = Message::default()
-                        .with_header(header)
-                        .with_questions(questions)
-                        .with_answers(response_answers);
-
-                    udp_socket
-                        .send_to(&response.encode(), source)
-                        .expect("Failed to send response");
-                } else {
-                    udp_socket
-                        .send_to(&response.encode(), source)
-                        .expect("Failed to send response");
-                }
+                udp_socket
+                    .send_to(&response.encode(), source)
+                    .expect("Failed to send response");
             }
             Err(e) => {
                 eprintln!("Error receiving data: {}", e);
@@ -576,14 +463,4 @@ fn main() {
             }
         }
     }
-}
-
-fn split_questions(message: &Message) -> Vec<Message> {
-    let mut messages = vec![];
-
-    for question in message.questions.iter() {
-        messages.push(message.clone().with_questions(vec![question.clone()]));
-    }
-
-    messages
 }
